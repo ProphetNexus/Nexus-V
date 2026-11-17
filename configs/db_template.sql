@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS `cves` (
     `source_identifier` VARCHAR(255),
     `source_type` VARCHAR(50),
     `description` LONGTEXT, 
-    `weaknesses` LONGTEXT,
-    `references_urls` LONGTEXT,
+    `weaknesses` TEXT,
+    `references_urls` TEXT,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`cve_id`),
     INDEX `idx_published_severity` (`published`, `severity`),
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS `cves` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `cve_affected_products` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `cve_id` VARCHAR(25) NOT NULL,
     `cpe_string` VARCHAR(512) NOT NULL,
     `version_start_including` VARCHAR(100),
@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS `cve_affected_products` (
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT `fk_cve_id` FOREIGN KEY (`cve_id`) REFERENCES `cves` (`cve_id`) ON DELETE CASCADE,
     UNIQUE KEY `unique_cve_product` (`cve_id`, `cpe_string`(255)),
-    INDEX `idx_cpe_lookup` (`cpe_string`(255))
+    INDEX `idx_cpe_lookup` (`cpe_string`(255)),
+    FULLTEXT INDEX `idx_cpe_ft` (`cpe_string`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `cases` (
@@ -101,9 +102,8 @@ CREATE TABLE IF NOT EXISTS `claim_verification_records` (
     INDEX `idx_verification` (`verification_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- MITRE ATT&CK Framework Tables
 CREATE TABLE IF NOT EXISTS `attack_tactics` (
-    `tactic_id` VARCHAR(20) NOT NULL, -- e.g., TA0001
+    `tactic_id` VARCHAR(20) NOT NULL,
     `name` VARCHAR(255) NOT NULL,
     `description` TEXT,
     `url` VARCHAR(255),
@@ -111,11 +111,11 @@ CREATE TABLE IF NOT EXISTS `attack_tactics` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `attack_techniques` (
-    `technique_id` VARCHAR(20) NOT NULL, -- e.g., T1566 or T1566.001
+    `technique_id` VARCHAR(20) NOT NULL,
     `name` VARCHAR(255) NOT NULL,
     `description` TEXT,
     `url` VARCHAR(255),
-    `parent_technique_id` VARCHAR(20) NULL, -- Self-reference for sub-techniques
+    `parent_technique_id` VARCHAR(20) NULL,
     PRIMARY KEY (`technique_id`),
     CONSTRAINT `fk_parent_technique` FOREIGN KEY (`parent_technique_id`) REFERENCES `attack_techniques` (`technique_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,5 +1,6 @@
 import yaml
 import pandas as pd
+import MySQLdb.cursors
 from pathlib import Path
 
 class DBReader:
@@ -21,10 +22,12 @@ class DBReader:
         if query_type not in self.premade_queries:
             raise KeyError(f"Query type '{query_type}' is not defined.")
 
-        conn = self.db_pool.get_connection()
-        cursor = conn.cursor(dictionary=True)
-            
+        conn = None
+        cursor = None
         try:
+            conn = self.db_pool.get_connection()
+            cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+            
             if query_type == "search_by_cpe_keyword":
                 params = (f"%{search_term}%", start_date, end_date)
             else:
@@ -35,8 +38,10 @@ class DBReader:
         except Exception as e:
             raise RuntimeError(f"Execution of SQL query '{query_type}' failed") from e
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
 if __name__ == "__main__":
     try:

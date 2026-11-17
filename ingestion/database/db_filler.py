@@ -1,6 +1,6 @@
 from typing import List, Dict
 import time
-import mysql.connector
+import MySQLdb
 
 class Upsert:
     def __init__(self, db_pool):
@@ -42,44 +42,47 @@ class Upsert:
             """
 
             cpe_sql = """
-                INSERT INTO `cve_affected_products` (
+                INSERT IGNORE INTO `cve_affected_products` (
                     `cve_id`, `cpe_string`, `version_start_including`, 
                     `version_end_excluding`, `version_end_including`
                 ) VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE 
-                    `version_start_including` = VALUES(`version_start_including`),
-                    `version_end_excluding` = VALUES(`version_end_excluding`),
-                    `version_end_including` = VALUES(`version_end_including`)
             """
 
-            tasks = [(cve_sql, batch_data['main'], "CVEs")]
-            if batch_data.get('products'):
-                tasks.append((cpe_sql, batch_data['products'], "Products"))
+            # Sub-chunk CPEs if there are massive lists to prevent MySQLdb memory blowups
+            products = batch_data.get('products', [])
+            chunk_size = 2000
+            chunked_products = [products[i:i + chunk_size] for i in range(0, len(products), chunk_size)] if products else []
 
-            for sql, data, label in tasks:
-                stack = [data]
-                
-                while stack:
-                    current_chunk = stack.pop()
-                    if not current_chunk:
-                        continue
-                        
-                    try:
-                        cursor.executemany(sql, current_chunk)
-                    except mysql.connector.Error as err:
-                        # Handle Deadlocks (1213) or Lock Timeouts (1205) with a retry
-                        if err.errno in (1213, 1205):
-                            time.sleep(0.5)
-                            stack.append(current_chunk)
+            tasks = [(cve_sql, [batch_data['main']], "CVEs")]
+            if chunked_products:
+                tasks.append((cpe_sql, chunked_products, "Products"))
+
+            for sql, dataset_list, label in tasks:
+                for chunk_data in dataset_list:
+                    stack = [chunk_data]
+                    
+                    while stack:
+                        current_chunk = stack.pop()
+                        if not current_chunk:
                             continue
                             
-                        if len(current_chunk) == 1:
-                            raise ValueError(f"Database rejected record in {label} (ID: {current_chunk[0][0]}): {err.msg}") from err
-                        
-                        # Split and retry to isolate the bad record
-                        mid = len(current_chunk) // 2
-                        stack.append(current_chunk[mid:])
-                        stack.append(current_chunk[:mid])
+                        try:
+                            cursor.executemany(sql, current_chunk)
+                        except MySQLdb.Error as err:
+                            errno = err.args[0] if err.args else None
+                            msg = err.args[1] if len(err.args) > 1 else str(err)
+
+                            if errno in (1213, 1205):
+                                time.sleep(0.5)
+                                stack.append(current_chunk)
+                                continue
+                                
+                            if len(current_chunk) == 1:
+                                raise ValueError(f"Database rejected record in {label} (ID: {current_chunk[0][0]}): {msg}") from err
+                            
+                            mid = len(current_chunk) // 2
+                            stack.append(current_chunk[mid:])
+                            stack.append(current_chunk[:mid])
 
             conn.commit()
 
@@ -117,29 +120,34 @@ class Upsert:
             map_sql = "INSERT IGNORE INTO `technique_tactics` (`technique_id`, `tactic_id`) VALUES (%s, %s)"
 
             tasks = [
-                (tactic_sql, data.get('tactics', []), "Tactics"),
-                (tech_sql, data.get('techniques', []), "Techniques"),
-                (tech_sql, data.get('sub_techniques', []), "Sub-Techniques"),
-                (map_sql, data.get('mappings', []), "Mappings")
+                (tactic_sql, [data.get('tactics', [])], "Tactics"),
+                (tech_sql, [data.get('techniques', [])], "Techniques"),
+                (tech_sql, [data.get('sub_techniques', [])], "Sub-Techniques"),
+                (map_sql, [data.get('mappings', [])], "Mappings")
             ]
 
-            for sql, dataset, label in tasks:
-                stack = [dataset]
-                while stack:
-                    current = stack.pop()
-                    if not current: continue
-                    try:
-                        cursor.executemany(sql, current)
-                    except mysql.connector.Error as err:
-                        if err.errno in (1213, 1205):
-                            time.sleep(0.2)
-                            stack.append(current)
+            for sql, dataset_list, label in tasks:
+                for chunk_data in dataset_list:
+                    stack = [chunk_data]
+                    while stack:
+                        current = stack.pop()
+                        if not current:
                             continue
-                        if len(current) == 1:
-                            raise ValueError(f"MITRE framework record rejected for {label}: {err.msg}") from err
-                        mid = len(current) // 2
-                        stack.append(current[mid:])
-                        stack.append(current[:mid])
+                        try:
+                            cursor.executemany(sql, current)
+                        except MySQLdb.Error as err:
+                            errno = err.args[0] if err.args else None
+                            msg = err.args[1] if len(err.args) > 1 else str(err)
+
+                            if errno in (1213, 1205):
+                                time.sleep(0.2)
+                                stack.append(current)
+                                continue
+                            if len(current) == 1:
+                                raise ValueError(f"MITRE framework record rejected for {label}: {msg}") from err
+                            mid = len(current) // 2
+                            stack.append(current[mid:])
+                            stack.append(current[:mid])
 
             conn.commit()
         except Exception as e:

@@ -18,7 +18,7 @@ def run_sync(sync_nvd=True, sync_mitre=True, mode='lastmod', days=1, chunk_size=
             manager.run_mitre_sync()
 
         if sync_nvd:
-            manager.run_nvd_sync(mode=mode, days=days, limit=None, chunk_limit=chunk_size)
+            manager.run_nvd_sync(mode=mode, days=days)
 
         print("\n[!] Synchronization cycle finished.")
 
@@ -40,6 +40,6 @@ def run_visualization():
     )
 
 if __name__ == "__main__":
-    #run_sync(sync_nvd=True, sync_mitre=False, mode='lastmod', days=60, chunk_size=2000)
+    run_sync(sync_nvd=True, sync_mitre=True, mode='full', chunk_size=2000)
     #run_visualization()
     pass

@@ -1,5 +1,6 @@
 import os
-import mysql.connector.pooling
+import MySQLdb
+from dbutils.pooled_db import PooledDB
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -24,29 +25,25 @@ class DatabasePool:
         db_env_path = root / 'configs' / 'db.env'
         load_dotenv(dotenv_path=db_env_path)
 
-        db_config = {
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'host': os.getenv('DB_HOST', 'localhost'),
-            'port': int(os.getenv('DB_PORT', '3306')),
-            'database': os.getenv('DB_NAME'),
-            'charset': 'utf8mb4',
-            'collation': 'utf8mb4_unicode_ci',
-            'use_pure': False 
-        }
-
         try:
-            # Combined pool size to accommodate both readers and writers
-            self.pool = mysql.connector.pooling.MySQLConnectionPool(
-                pool_name="ethical_tool_pool",
-                pool_size=15,
-                **db_config
+            self.pool = PooledDB(
+                creator=MySQLdb,
+                maxconnections=15,
+                mincached=5,
+                blocking=True,
+                ping=0,
+                user=os.getenv('DB_USER'),
+                passwd=os.getenv('DB_PASSWORD'),
+                host=os.getenv('DB_HOST', 'localhost'),
+                port=int(os.getenv('DB_PORT', '3306')),
+                db=os.getenv('DB_NAME'),
+                charset='utf8mb4'
             )
-        except mysql.connector.Error as e:
+        except MySQLdb.Error as e:
             raise ConnectionError(f"Failed to initialize MySQL Connection Pool: {e}") from e
 
     def get_connection(self):
         try:
-            return self.pool.get_connection()
-        except mysql.connector.Error as e:
+            return self.pool.connection()
+        except MySQLdb.Error as e:
             raise RuntimeError(f"Database connection request failed: {e}") from e

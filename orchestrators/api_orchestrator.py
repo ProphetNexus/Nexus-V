@@ -1,6 +1,5 @@
 import sys
 import time
-import warnings
 from modules.logger import log_manager
 from ingestion.database.db_pool import DatabasePool
 from ingestion.database.db_filler import Upsert
@@ -25,32 +24,21 @@ class APIManager:
             self.logger.log_critical(f"APIManager failed to initialize infrastructure: {e}")
             sys.exit(1)
 
-    def run_nvd_sync(self, mode='lastmod', days=None, limit=None, chunk_limit=1000):
+    def run_nvd_sync(self, mode='lastmod', days=None):
         start_time = time.time()
         days = days if days is not None else 7
-        self.logger.log_info(f"NVD Sync Started | Mode: {mode.upper()} | Days: {days} | Limit: {limit}")
+        self.logger.log_info(f"NVD Sync Started | Mode: {mode.upper()} | Days: {days}")
 
         try:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                
-                for raw_batch in self.nvd_fetcher.stream_raw_data(
-                    mode=mode, 
-                    previous_days=days, 
-                    limit=limit, 
-                    chunk_limit=chunk_limit
-                ):
-                    if w:
-                        self.logger.log_warning(f"API Stability Alert: {w[-1].message}")
-                        w.clear()
+            for raw_batch in self.nvd_fetcher.stream_raw_data(
+                mode=mode, 
+                previous_days=days
+            ):
+                processed_batch = self.nvd_processor.process_batch(raw_batch)
+                del raw_batch  # Free raw JSON memory immediately before DB insert
 
-                    processed_batch = self.nvd_processor.process_batch(raw_batch)
-
-                    self.filler.process_and_save(processed_batch)
-                    
-                    cve_count = len(processed_batch['main'])
-                    product_count = len(processed_batch['products'])
-                    self.logger.log_info(f"Batch Sync: {cve_count} CVEs and {product_count} CPEs processed.")
+                self.filler.process_and_save(processed_batch)
+                del processed_batch  # Free processed tuples memory
 
             duration = round((time.time() - start_time) / 60, 2)
             self.logger.log_info(f"NVD Sync Completed Successfully in {duration} minutes.")
@@ -68,13 +56,11 @@ class APIManager:
         self.logger.log_info("Starting MITRE ATT&CK Framework Full Refresh...")
         try:
             for raw_matrix in self.mitre_fetcher.fetch_raw_matrices():
-                
                 processed_batch = self.mitre_processor.process_matrix(raw_matrix)
+                del raw_matrix
                 
                 self.filler.save_mitre_framework(processed_batch)
-                
-                tech_count = len(processed_batch.get('techniques', [])) + len(processed_batch.get('sub_techniques', []))
-                self.logger.log_info(f"MITRE Batch Sync: {tech_count} techniques/sub-techniques processed.")
+                del processed_batch
             
             self.logger.log_info("MITRE Sync Completed Successfully.")
         except Exception as e:
@@ -83,4 +69,4 @@ class APIManager:
 if __name__ == "__main__":
     manager = APIManager()
     manager.run_mitre_sync()
-    manager.run_nvd_sync(mode='lastmod', days=360, limit=None, chunk_limit=1000)
+    manager.run_nvd_sync(mode='lastmod', days=120)
